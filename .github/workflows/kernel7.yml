@@ -1,0 +1,51 @@
+name: kernel7
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps (llvm, glslang, openssl)
+        run: |
+          brew install llvm glslang openssl@3 || true
+          ls -l /opt/homebrew/opt/llvm/bin/llvm-objcopy 2>/dev/null || echo "NO llvm-objcopy"
+          ls -l /opt/homebrew/bin/glslangValidator 2>/dev/null || echo "NO glslang"
+      - name: build setup..images (full release)
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to images --unique-chip-id 0123456789abcdef
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
+          if [ -d out/droidvm/release ]; then
+            ls -la out/droidvm/release
+            cp -R out/droidvm/release artifacts/release 2>/dev/null || true
+          else
+            echo "no release dir"; find out -maxdepth 3 | head -20
+          fi
+          find ../UniXNU/out -name '*.macho' | while read f; do cp "$f" "artifacts/$(echo $f|tr '/' '_')" 2>/dev/null; done
+          du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: artifacts/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
