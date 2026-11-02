@@ -1,17 +1,16 @@
 diff --git a/scripts/build-native-legacy-display.py b/scripts/build-native-legacy-display.py
-index 59d67a6..d9abb41 100644
+index 59d67a6..9f631d4 100644
 --- a/scripts/build-native-legacy-display.py
 +++ b/scripts/build-native-legacy-display.py
-@@ -524,3 +524,23 @@ sources.extend([ROOT/'drivers/GopFramebuffer/NativeGOPPresenter.cpp',ROOT/'drive
-     bindings={n:hex(v) for n,v in bindings.items()},virtual_entries=358,owned_entries=owned,inherited_native_entries=native,
-     guarded_backend_leaves=[i for i in pure if i not in (213,337)],original_instructions_modified=False,driver_initialized=False,display_presented=False,desktop=False),indent=2)+'\n')
- print('Built genuine original Legacy inheritance/dispatch; seven backend leaves still guarded, runtime lifecycle unqualified')
-+
-+
+@@ -517,6 +517,27 @@ require(code((gop/'NativeGOPPresenter.o').read_bytes(),macho((gop/'NativeGOPPres
+         code(gop_late.read_bytes(),macho(gop_late.read_bytes())),'Owned presenter instructions unchanged by late init staging')
+ run(['xcrun','ar','rcs',archive,gop_late])
+ sources.extend([ROOT/'drivers/GopFramebuffer/NativeGOPPresenter.cpp',ROOT/'drivers/GopFramebuffer/NativeGOPWire.h'])
 +# --- droidvm: the board package's newer files reference three symbols this iPadOS 17 display archive predates.
 +# droidvm_page_info: the host rig's page diagnostic (kind 8) -- disabled here. droidvm_sensor_processor_register:
-+# the motion sensors' SPU channel -- none on this board (kits/droidvm/DroidVMSensorProcessor.cpp is not built).
-+# native_adreno_fences: Adreno740 fence counters -- this board's GPU driver is not Adreno740's.
++# the motion sensors' SPU channel -- none on this board. native_adreno_fences: Adreno740 fence counters -- this
++# board's GPU driver is not Adreno740's. Compiled into the archive before the report, so the report's archive and
++# source digests still describe what the kernel links.
 +_stub = OUT / 'DroidVMUndefinedStubs.c'
 +_stub.write_text("""#include <stdint.h>
 +#include <stdbool.h>
@@ -22,7 +21,12 @@ index 59d67a6..d9abb41 100644
 +int droidvm_sensor_processor_register(void) { return 0; }
 +bool native_adreno_fences(uint32_t *written, uint32_t *total) { (void)written; (void)total; return false; }
 +""")
++_stub_obj = OUT / 'DroidVMUndefinedStubs.o'
 +_sdk = run(['xcrun','--sdk','iphoneos','--show-sdk-path'], text=True).strip()
-+run(['xcrun','clang','-target','arm64-apple-ios17','-isysroot',_sdk,'-O2','-fno-builtin','-c',str(_stub),'-o',str(OUT/'DroidVMUndefinedStubs.o')])
-+run(['xcrun','ar','rcs',archive,str(OUT/'DroidVMUndefinedStubs.o')])
++run(['xcrun','clang','-target','arm64-apple-ios17','-isysroot',_sdk,'-O2','-fno-builtin','-c',str(_stub),'-o',str(_stub_obj)])
++run(['xcrun','ar','rcs',archive,str(_stub_obj)])
++sources = sources + [_stub]
 +print('appended DroidVMUndefinedStubs.o to', archive)
+ (OUT/'build-report.json').write_text(json.dumps(dict(
+     source_sha256={str(p.relative_to(ROOT)):sha(p) for p in sources},generated_abi_sha256=sha(OUT/'OriginalLegacyFramebufferABI.h'),
+     original_candidate_sha256=sha(candidate),original_audit_sha256=sha(ROOT/'build/display-analysis/mobile-graphics-legacy-abi.json'),
