@@ -1,0 +1,52 @@
+name: kernel5
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  kernel:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; df -h / | tail -1
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version; echo "token len: ${#GITHUB_TOKEN}"
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew openssl@3
+        run: brew install openssl@3 || true
+      - name: build setup..kernel (retry)
+        run: |
+          for i in 1 2 3; do
+            echo "=== attempt $i ==="
+            if python3 scripts/build-droidvm-all.py --from setup --to kernel --unique-chip-id 0123456789abcdef; then
+              echo "build OK"; break
+            fi
+            echo "attempt $i failed, sleeping 45s"; sleep 45
+          done
+      - name: debug gpu archive
+        if: always()
+        run: |
+          T=../UniXNU/out/droidvm/tree
+          if [ -d "$T" ]; then cd "$T" && (python3 scripts/build-droidvm-gpu.py 2>&1 | tail -60) || true; else echo "no tree"; fi
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts/logs artifacts/machos
+          cp -R out artifacts/repo-out 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs/build-all 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/logs/unixnu 2>/dev/null || true
+          find ../UniXNU/out ../UniXNU/out-reference -name '*.macho' 2>/dev/null | head -10 | while read f; do cp -v "$f" artifacts/machos/ 2>/dev/null; done
+          ls -la artifacts/machos | head; du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: artifacts/**
+          retention-days: 7
+          if-no-files-found: warn
