@@ -1,0 +1,68 @@
+name: kernel22
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps
+        run: |
+          brew install llvm lld glslang shaderc spirv-tools openssl@3 gnu-sed bison flex cmake ninja pkg-config coreutils mtools dosfstools || true
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          LLD=$(command -v lld-link || find /opt/homebrew -maxdepth 4 -name lld-link -type f 2>/dev/null | head -1)
+          if [ -n "$LLD" ]; then mkdir -p /opt/homebrew/opt/llvm/bin && ln -sf "$LLD" /opt/homebrew/opt/llvm/bin/lld-link; fi
+          command -v mformat; command -v gsed
+      - name: apply patches
+        run: |
+          git apply .github/droidvm-undefined-stubs.patch
+          git apply .github/plugin-tolerant.patch
+          git apply .github/skip-plugin.patch
+          git apply .github/ownervisor-tolerant.patch
+          git apply .github/payload-without-trust.patch
+          git apply .github/images-without-plugin.patch
+          echo "patches applied"
+      - name: build setup..images (2 GiB data seed)
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to images --data-gib 2 --unique-chip-id 0123456789abcdef
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts
+          R=../UniXNU/out/droidvm/release
+          ls -la "$R" 2>/dev/null || true
+          du -sh "$R" 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
+          if [ -d "$R" ]; then
+            mkdir -p artifacts/release
+            for f in "$R"/kernel.macho "$R"/droidvm-disk.img "$R"/release.json "$R"/*.adt "$R"/*.bin; do
+              [ -f "$f" ] && cp -v "$f" artifacts/release/ 2>/dev/null
+            done
+            for f in "$R"/os.img "$R"/systemos.img; do
+              [ -f "$f" ] && ls -lh "$f" | awk '{print "NOT-UPLOADED", $5, $9}'
+            done
+          else echo "no release dir"; fi
+          find ../UniXNU/out -name '*.macho' | while read f; do cp "$f" "artifacts/$(echo $f|tr '/' '_')" 2>/dev/null; done
+          du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: artifacts/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
