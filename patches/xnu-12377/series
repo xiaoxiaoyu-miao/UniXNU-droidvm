@@ -1,0 +1,8 @@
+# Board patch paths for xnu-12377, one per line in application order (after the arm64 and iPadOS 17 series).
+# droidvm CI: the Gunyah vCPU changes the iPadOS 27 board carries (no WFE, caches written back for a core
+# starting with its MMU off, pmap sync flush) taken from ipados27/patches/xnu-12377 for this board.
+non-apple-vcpu-park.patch
+non-apple-vcpu-start-flush.patch
+non-apple-idle-wfi.patch
+zzx-pmap-sync-flush.patch
+non-apple-sigp-recover.patch
