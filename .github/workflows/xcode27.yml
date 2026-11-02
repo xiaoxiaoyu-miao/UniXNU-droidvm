@@ -1,0 +1,18 @@
+name: xcode27
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [xcode-27, xcode-27-xlarge]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - run: |
+          echo "== sw_vers"; sw_vers
+          echo "== xcodes"; ls -d /Applications/Xcode*.app 2>/dev/null || echo none
+          echo "== default"; xcodebuild -version || true
+          echo "== iig"; (xcrun --find iig || echo none)
+          echo "== sdk"; xcrun --sdk iphoneos --show-sdk-version || true
