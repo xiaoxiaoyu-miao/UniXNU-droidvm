@@ -1,0 +1,54 @@
+name: kernel13
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps and put lld-link next to llvm
+        run: |
+          brew install llvm lld glslang openssl@3 || true
+          LLD=$(command -v lld-link || true)
+          if [ -z "$LLD" ]; then LLD=$(find /opt/homebrew -maxdepth 4 -name 'lld-link' -type f 2>/dev/null | head -1); fi
+          echo "lld-link found at: $LLD"
+          if [ -n "$LLD" ]; then mkdir -p /opt/homebrew/opt/llvm/bin && ln -sf "$LLD" /opt/homebrew/opt/llvm/bin/lld-link; fi
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          llvm-objcopy --version | head -1; llvm-lib 2>&1 | head -1; lld-link --version 2>&1 | head -2
+      - name: apply stub patch
+        run: |
+          git apply .github/droidvm-undefined-stubs.patch
+          grep -c DroidVMUndefinedStubs scripts/build-native-legacy-display.py
+      - name: build setup..images
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to images --unique-chip-id 0123456789abcdef
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
+          if [ -d out/droidvm/release ]; then ls -la out/droidvm/release; cp -R out/droidvm/release artifacts/release; else echo "no release"; find out -maxdepth 4 | head -40; fi
+          find ../UniXNU/out -name '*.macho' | while read f; do cp "$f" "artifacts/$(echo $f|tr '/' '_')" 2>/dev/null; done
+          du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: artifacts/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
