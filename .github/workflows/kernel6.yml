@@ -1,0 +1,72 @@
+name: kernel6
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  kernel:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew openssl@3
+        run: brew install openssl@3 || true
+      - name: build setup..kernel (real exit code)
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to kernel --unique-chip-id 0123456789abcdef
+      - name: debug - run accelerator builder directly
+        if: always()
+        run: |
+          T=../UniXNU/out/droidvm/tree
+          if [ -d "$T" ]; then cd "$T" && (python3 scripts/build-adreno740-accelerator.py 2>&1 | tail -60) || true; else echo "no tree"; fi
+      - name: fallback - kernel without GPU archive
+        if: always()
+        run: |
+          set -o pipefail
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('configs/droidvm_defconfig')
+          s = p.read_text()
+          s2 = re.sub(r'^\s*"build-droidvm-gpu\.py",\s*$\n', '', s, flags=re.M)
+          p.write_text(s2)
+          print('dropped gpu archive:', s != s2)
+          PY
+          (python3 scripts/build-droidvm-all.py --only kernel --unique-chip-id 0123456789abcdef && echo "FALLBACK-GPU-OK") || echo "FALLBACK-GPU-FAILED"
+      - name: fallback2 - kernel without GPU and display archives
+        if: always()
+        run: |
+          set -o pipefail
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('configs/droidvm_defconfig')
+          s = p.read_text()
+          s2 = re.sub(r'^\s*"build-native-legacy-display\.py",\s*$\n', '', s, flags=re.M)
+          p.write_text(s2)
+          print('dropped display archive:', s != s2)
+          PY
+          (python3 scripts/build-droidvm-all.py --only kernel --unique-chip-id 0123456789abcdef && echo "FALLBACK-NODISPLAY-OK") || echo "FALLBACK-NODISPLAY-FAILED"
+      - name: collect
+        if: always()
+        run: |
+          mkdir -p artifacts/logs artifacts/machos
+          df -h / | tail -1
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs/build-all 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/logs/unixnu 2>/dev/null || true
+          find ../UniXNU/out ../UniXNU/out-reference -name '*.macho' 2>/dev/null | while read f; do d=$(echo "$f" | tr '/' '_'); cp "$f" "artifacts/machos/$d" 2>/dev/null; done
+          ls -la artifacts/machos | head -10
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: artifacts/**
+          retention-days: 7
+          if-no-files-found: warn
