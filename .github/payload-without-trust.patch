@@ -1,0 +1,25 @@
+diff --git a/scripts/build-droidvm-all.py b/scripts/build-droidvm-all.py
+index 98ec09d..5635da2 100755
+--- a/scripts/build-droidvm-all.py
++++ b/scripts/build-droidvm-all.py
+@@ -459,9 +459,17 @@ class Build:
+         chip = self.args.unique_chip_id
+         if not chip:
+             sys.exit('the payload needs --unique-chip-id (or UNIXNU_UNIQUE_CHIP_ID): the platform seed, 16 hex digits')
+-        self.unixnu_cmd('build', 'payload', '--owner-trust-cache', self.tree / 'build/adreno-metal-plugin/owner-trust.bundle',
+-                        '--data-ramdisk', self.data / self.seed_name(), '--unique-chip-id', chip,
+-                        logfile=self.logs / 'payload.log')
++        # droidvm CI: the owner trust bundle is made from the Metal plugin's trust.json, which the skipped
++        # plugin step would have written. The payload then carries the original trust caches only: the
++        # board's own kexts are prelinked in the kernel and the debug shell is optional.
++        trust_cache = self.tree / 'build/adreno-metal-plugin/owner-trust.bundle'
++        arguments = ['build', 'payload']
++        if trust_cache.exists():
++            arguments += ['--owner-trust-cache', trust_cache]
++        else:
++            print('warning: no owner trust bundle (the Metal plugin step was skipped); payload without it')
++        arguments += ['--data-ramdisk', self.data / self.seed_name(), '--unique-chip-id', chip]
++        self.unixnu_cmd(*arguments, logfile=self.logs / 'payload.log')
+         run(['bash', DEVICE / 'scripts/make-droidvm-disk.sh', self.work / 'payload/payload.img', self.efi_dir(),
+              self.work / 'payload/droidvm-disk.img'], env=self.env, logfile=self.logs / 'disk.log')
+ 
