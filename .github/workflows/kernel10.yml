@@ -1,0 +1,64 @@
+name: kernel10
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps
+        run: brew install llvm glslang openssl@3 || true
+      - name: patch display archive with the three missing symbols
+        run: |
+          cat >> scripts/build-native-legacy-display.py <<'PYEOF'
+
+# --- droidvm: the board package's newer files reference three symbols this iPadOS 17 display archive predates.
+# droidvm_page_info: the host rig's page diagnostic (kind 8) -- disabled. droidvm_sensor_processor_register: the
+# motion sensors' SPU channel -- none here. native_adreno_fences: Adreno740 fence counters -- this board has none.
+_stub = OUT / 'DroidVMUndefinedStubs.c'
+_stub.write_text('''#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+size_t droidvm_page_info(uint64_t address, bool permuted, char *out, size_t size) {
+	(void)address; (void)permuted; (void)out; (void)size; return 0;
+}
+int droidvm_sensor_processor_register(void) { return 0; }
+bool native_adreno_fences(uint32_t *written, uint32_t *total) { (void)written; (void)total; return false; }
+''')
+_sdk = run(['xcrun','--sdk','iphoneos','--show-sdk-path'], text=True).strip()
+run(['xcrun','clang','-target','arm64-apple-ios17','-isysroot',_sdk,'-O2','-fno-builtin','-c',str(_stub),'-o',str(OUT/'DroidVMUndefinedStubs.o')])
+run(['xcrun','ar','rcs',archive,str(OUT/'DroidVMUndefinedStubs.o')])
+print('appended DroidVMUndefinedStubs.o to', archive)
+PYEOF
+          tail -5 scripts/build-native-legacy-display.py
+      - name: build setup..images
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to images --unique-chip-id 0123456789abcdef
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
+          if [ -d out/droidvm/release ]; then ls -la out/droidvm/release; cp -R out/droidvm/release artifacts/release; else echo "no release"; find out -maxdepth 4 | head -40; fi
+          find ../UniXNU/out -name '*.macho' | while read f; do cp "$f" "artifacts/$(echo $f|tr '/' '_')" 2>/dev/null; done
+          du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: artifacts/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
