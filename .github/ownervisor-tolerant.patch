@@ -1,0 +1,32 @@
+diff --git a/scripts/add-ownervisor-data.py b/scripts/add-ownervisor-data.py
+index 19c4381..522b181 100644
+--- a/scripts/add-ownervisor-data.py
++++ b/scripts/add-ownervisor-data.py
+@@ -58,8 +58,13 @@ def main():
+         device = attached['system-entities'][0]['dev-entry']
+         try:
+             bin_dir, daemon_dir = mount / 'ngpu/bin', mount / 'ngpu/daemons'
+-            if not bin_dir.is_dir() or not (bin_dir / 'adrenoprobed').is_file():
+-                sys.exit('BASE has no ngpu/bin/adrenoprobed; stage the GPU plugin first (add-gpu-plugin-data.py)')
++            has_probe = bin_dir.is_dir() and (bin_dir / 'adrenoprobed').is_file()
++            if not has_probe:
++                # droidvm CI: the Metal plugin step is skipped (its host simulation does not build), so the
++                # seed carries no ngpu/bin/adrenoprobed. The debug shell does not need it: stage it anyway.
++                print('warning: BASE has no ngpu/bin/adrenoprobed; staging the debug shell without it')
++                bin_dir.mkdir(parents=True, exist_ok=True)
++                daemon_dir.mkdir(parents=True, exist_ok=True)
+             # The debug shell (github.com/Droid-VM/ownervisor, scripts/build-droidvm-ownervisor.py): ownervisor, ownerctl and
+             # ownertest, the shell -- applebox, dropbear, zsh, debugserver, libimobiledevice with a link per tool -- and its
+             # built-in services (dropbear = ssh on port 2222, selftest, serial-shell defined but not started: on this board
+@@ -123,8 +128,9 @@ def main():
+                 shutil.copyfile(definition, svc_dir / definition.name)
+             for marker in sorted((SHELL / 'enabled').iterdir()):
+                 (en_dir / marker.name).write_text('')
+-            (svc_dir / 'adrenoprobe.json').write_text(json.dumps(
+-                {'exec': ['/private/var/ngpu/bin/adrenoprobed'], 'keepalive': False, 'uid': 0}, indent=2) + '\n')
++            if has_probe:
++                (svc_dir / 'adrenoprobe.json').write_text(json.dumps(
++                    {'exec': ['/private/var/ngpu/bin/adrenoprobed'], 'keepalive': False, 'uid': 0}, indent=2) + '\n')
+             for path in list(svc_dir.iterdir()) + list(en_dir.iterdir()):
+                 os.chmod(path, 0o644)
+             # No orientd: backboardd takes the device orientation from CoreMotion and the kernel's motion HID services
