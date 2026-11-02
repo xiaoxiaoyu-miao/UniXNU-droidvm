@@ -1,0 +1,35 @@
+name: firmware
+on:
+  workflow_dispatch:
+jobs:
+  edk2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu acpica-tools uuid-dev nasm python3 python3-pip
+          aarch64-linux-gnu-gcc --version | head -1; iasl -v 2>&1 | head -1 || true
+      - name: clone edk2-gunyah
+        run: git clone --recursive --depth 1 -b droidvm https://github.com/Droid-VM/edk2-gunyah.git src
+      - name: build
+        run: |
+          cd src
+          ls
+          bash build.sh 2>&1 | tail -40
+      - name: collect
+        if: always()
+        run: |
+          mkdir -p artifacts
+          find src -name 'edk2-gunyah*.fd' -o -name '*.fd' | head -10 | while read f; do cp -v "$f" artifacts/ 2>/dev/null; done
+          find src -maxdepth 2 -name 'Build' -type d | head -3
+          ls -la artifacts || true
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: artifacts/**
+          retention-days: 7
+          if-no-files-found: warn
