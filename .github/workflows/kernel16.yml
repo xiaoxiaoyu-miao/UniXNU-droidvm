@@ -14,25 +14,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: clone UniXNU (wip/droidvm)
         run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
-      - name: brew deps and put lld-link next to llvm
+      - name: brew deps
         run: |
           brew install llvm lld glslang openssl@3 gnu-sed bison flex cmake ninja pkg-config coreutils || true
-          LLD=$(command -v lld-link || true)
-          if [ -z "$LLD" ]; then LLD=$(find /opt/homebrew -maxdepth 4 -name 'lld-link' -type f 2>/dev/null | head -1); fi
-          echo "lld-link found at: $LLD"
-          if [ -n "$LLD" ]; then mkdir -p /opt/homebrew/opt/llvm/bin && ln -sf "$LLD" /opt/homebrew/opt/llvm/bin/lld-link; fi
           export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-          llvm-objcopy --version | head -1; llvm-lib 2>&1 | head -1; lld-link --version 2>&1 | head -2
-      - name: check gsed
-        run: |
-          command -v gsed; gsed --version | head -1
+          LLD=$(command -v lld-link || find /opt/homebrew -maxdepth 4 -name lld-link -type f 2>/dev/null | head -1)
+          if [ -n "$LLD" ]; then mkdir -p /opt/homebrew/opt/llvm/bin && ln -sf "$LLD" /opt/homebrew/opt/llvm/bin/lld-link; fi
+          llvm-objcopy --version | head -1; lld-link --version 2>&1 | head -1; command -v gsed
       - name: apply patches
         run: |
           git apply .github/droidvm-undefined-stubs.patch
           git apply .github/plugin-tolerant.patch
           grep -c DroidVMUndefinedStubs scripts/build-native-legacy-display.py
-          grep -c "warning: the host simulation left no plugin_smoke" scripts/build-droidvm-all.py
-        run: |
+          grep -c "host simulation left no plugin_smoke" scripts/build-droidvm-all.py
       - name: build setup..images
         env:
           PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
@@ -46,7 +40,7 @@ jobs:
           mkdir -p artifacts
           cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
           cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
-          if [ -d out/droidvm/release ]; then ls -la out/droidvm/release; cp -R out/droidvm/release artifacts/release; else echo "no release"; find out -maxdepth 4 | head -40; fi
+          if [ -d out/droidvm/release ]; then ls -la out/droidvm/release; du -sh out/droidvm/release; cp -R out/droidvm/release artifacts/release; else echo "no release"; fi
           find ../UniXNU/out -name '*.macho' | while read f; do cp "$f" "artifacts/$(echo $f|tr '/' '_')" 2>/dev/null; done
           du -sh artifacts
       - name: upload
