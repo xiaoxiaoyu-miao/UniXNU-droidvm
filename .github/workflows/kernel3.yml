@@ -1,0 +1,51 @@
+name: kernel3
+on:
+  workflow_dispatch:
+jobs:
+  kernel:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; df -h / | tail -1
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version; (xcrun --find iig || true); xcrun --sdk iphoneos --show-sdk-version || true
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew openssl@3
+        run: brew install openssl@3 || true
+      - name: build setup..kernel
+        run: |
+          python3 scripts/build-droidvm-all.py --from setup --to kernel --unique-chip-id 0123456789abcdef
+      - name: disk usage
+        if: always()
+        run: df -h / | tail -2
+      - name: find artifacts
+        if: always()
+        run: |
+          echo "--- repo out ---"; find out -maxdepth 3 2>/dev/null | head -30
+          echo "--- unixnu out ---"; find ../UniXNU/out -maxdepth 3 2>/dev/null | head -30
+          find ../UniXNU/out -name '*.macho' 2>/dev/null | head -10
+      - name: upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            out/droidvm/build-all/logs/**
+            ../UniXNU/out/droidvm/logs/**
+            ../UniXNU/out-reference/droidvm/logs/**
+          retention-days: 7
+          if-no-files-found: warn
+      - name: upload kernels
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernels
+          path: |
+            ../UniXNU/out/droidvm/**
+            out/droidvm/**
+          retention-days: 7
+          if-no-files-found: warn
