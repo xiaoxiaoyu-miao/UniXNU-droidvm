@@ -1,0 +1,55 @@
+name: kernel8
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps
+        run: |
+          brew install llvm glslang openssl@3 || true
+          /opt/homebrew/opt/llvm/bin/llvm-objcopy --version | head -1 || echo "NO llvm-objcopy"
+      - name: drop stale display archive from board.toml
+        run: |
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('board.toml')
+          s = p.read_text()
+          s2 = re.sub(r'^\s*"build-native-legacy-display\.py",\s*$\n', '', s, flags=re.M)
+          p.write_text(s2)
+          print('dropped display archive:', s != s2)
+          PY
+      - name: build setup..images
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to images --unique-chip-id 0123456789abcdef
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
+          if [ -d out/droidvm/release ]; then ls -la out/droidvm/release; cp -R out/droidvm/release artifacts/release; else echo "no release"; find out -maxdepth 4 | head -30; fi
+          find ../UniXNU/out -name '*.macho' | while read f; do cp "$f" "artifacts/$(echo $f|tr '/' '_')" 2>/dev/null; done
+          du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: artifacts/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
