@@ -1,0 +1,34 @@
+name: kernel
+on:
+  workflow_dispatch:
+jobs:
+  kernel:
+    runs-on: macos-14
+    timeout-minutes: 350
+    steps:
+      - name: select Xcode 15.4
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app && xcodebuild -version
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew openssl@3
+        run: brew install openssl@3 || true
+      - name: list steps
+        run: python3 scripts/build-droidvm-all.py --list
+      - name: build setup..kernel
+        run: |
+          python3 scripts/build-droidvm-all.py --from setup --to kernel \
+            --unique-chip-id 0123456789abcdef 2>&1 | tail -120
+      - name: disk usage
+        if: always()
+        run: df -h / | tail -2
+      - name: upload kernel artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-out
+          path: |
+            out/droidvm/release/**
+            UniXNU/out/droidvm/**
+          retention-days: 7
+          if-no-files-found: warn
