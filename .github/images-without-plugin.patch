@@ -1,0 +1,31 @@
+diff --git a/scripts/build-droidvm-all.py b/scripts/build-droidvm-all.py
+index 98ec09d..d79a3b7 100755
+--- a/scripts/build-droidvm-all.py
++++ b/scripts/build-droidvm-all.py
+@@ -485,7 +485,13 @@ class Build:
+             dirty = subprocess.run(['git', '-C', path, 'status', '--porcelain', '--untracked-files=no'],
+                                    capture_output=True, text=True).stdout.strip()
+             return head + ('-dirty' if dirty else '')
+-        plugin = json.loads((self.tree / 'build/adreno-metal-plugin/trust.json').read_text())
++        plugin_file = self.tree / 'build/adreno-metal-plugin/trust.json'
++        if plugin_file.is_file():
++            plugin = json.loads(plugin_file.read_text())
++        else:
++            # droidvm CI: the Metal plugin step is skipped, so there is no plugin trust record.
++            print('warning: no plugin trust.json (the Metal plugin step was skipped)')
++            plugin = {}
+         tools = {}
+         for path in sorted((self.tree / 'build/owner-trust-extra').glob('*.json')):
+             tools[path.stem] = json.loads(path.read_text())['cdhashes']
+@@ -495,8 +501,9 @@ class Build:
+             'darwinboot': commit(self.unixnu / 'drivers/DarwinBoot'),
+             'data_seed': self.seed_name(), 'data_volume_uuid': json.loads(
+                 (self.tree / 'build/owner-data-fixture/seed.json').read_text())['volume_uuid'],
+-            'trust_sha256': sha256(self.tree / 'build/adreno-metal-plugin/owner-trust.bundle'),
+-            'plugin': {k: plugin[k] for k in ('cdhash', 'daemon_cdhash', 'turnip_cdhash')},
++            'trust_sha256': (sha256(self.tree / 'build/adreno-metal-plugin/owner-trust.bundle')
++                             if (self.tree / 'build/adreno-metal-plugin/owner-trust.bundle').exists() else None),
++            'plugin': {k: plugin[k] for k in ('cdhash', 'daemon_cdhash', 'turnip_cdhash') if k in plugin},
+             'owner_tools': tools,
+             'checks': json.loads((self.stamps / 'checks.json').read_text()) if (self.stamps / 'checks.json').is_file() else {},
+             'files': {name: {'bytes': (self.release / name).stat().st_size, 'sha256': sha256(self.release / name)}
