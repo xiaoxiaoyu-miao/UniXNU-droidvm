@@ -1,0 +1,28 @@
+diff --git a/scripts/build-native-legacy-display.py b/scripts/build-native-legacy-display.py
+index 59d67a6..d9abb41 100644
+--- a/scripts/build-native-legacy-display.py
++++ b/scripts/build-native-legacy-display.py
+@@ -524,3 +524,23 @@ sources.extend([ROOT/'drivers/GopFramebuffer/NativeGOPPresenter.cpp',ROOT/'drive
+     bindings={n:hex(v) for n,v in bindings.items()},virtual_entries=358,owned_entries=owned,inherited_native_entries=native,
+     guarded_backend_leaves=[i for i in pure if i not in (213,337)],original_instructions_modified=False,driver_initialized=False,display_presented=False,desktop=False),indent=2)+'\n')
+ print('Built genuine original Legacy inheritance/dispatch; seven backend leaves still guarded, runtime lifecycle unqualified')
++
++
++# --- droidvm: the board package's newer files reference three symbols this iPadOS 17 display archive predates.
++# droidvm_page_info: the host rig's page diagnostic (kind 8) -- disabled here. droidvm_sensor_processor_register:
++# the motion sensors' SPU channel -- none on this board (kits/droidvm/DroidVMSensorProcessor.cpp is not built).
++# native_adreno_fences: Adreno740 fence counters -- this board's GPU driver is not Adreno740's.
++_stub = OUT / 'DroidVMUndefinedStubs.c'
++_stub.write_text("""#include <stdint.h>
++#include <stdbool.h>
++#include <stddef.h>
++size_t droidvm_page_info(uint64_t address, bool permuted, char *out, size_t size) {
++    (void)address; (void)permuted; (void)out; (void)size; return 0;
++}
++int droidvm_sensor_processor_register(void) { return 0; }
++bool native_adreno_fences(uint32_t *written, uint32_t *total) { (void)written; (void)total; return false; }
++""")
++_sdk = run(['xcrun','--sdk','iphoneos','--show-sdk-path'], text=True).strip()
++run(['xcrun','clang','-target','arm64-apple-ios17','-isysroot',_sdk,'-O2','-fno-builtin','-c',str(_stub),'-o',str(OUT/'DroidVMUndefinedStubs.o')])
++run(['xcrun','ar','rcs',archive,str(OUT/'DroidVMUndefinedStubs.o')])
++print('appended DroidVMUndefinedStubs.o to', archive)
