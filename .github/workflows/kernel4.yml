@@ -1,0 +1,48 @@
+name: kernel4
+on:
+  workflow_dispatch:
+jobs:
+  kernel:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; df -h / | tail -1
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew openssl@3
+        run: brew install openssl@3 || true
+      - name: build setup..kernel
+        run: |
+          python3 scripts/build-droidvm-all.py --from setup --to kernel --unique-chip-id 0123456789abcdef
+      - name: debug gpu archive (rerun, full output)
+        if: always()
+        run: |
+          T=../UniXNU/out/droidvm/tree
+          if [ -d "$T" ]; then cd "$T" && (python3 scripts/build-droidvm-gpu.py 2>&1 | tail -80) || true; else echo "no tree"; fi
+      - name: collect artifacts
+        if: always()
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          df -h / | tail -1
+          echo "--- repo out ---"; find out -maxdepth 3 | head -30
+          echo "--- unixnu out ---"; find ../UniXNU/out -maxdepth 4 -name '*.macho' -o -maxdepth 4 -name '*.log' -o -maxdepth 4 -name '*.json' 2>/dev/null | head -40
+          cp -R out "$GITHUB_WORKSPACE/artifacts/repo-out" 2>/dev/null || true
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/logs"
+          cp -R ../UniXNU/out/droidvm/build-all/logs "$GITHUB_WORKSPACE/artifacts/logs/build-all" 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs "$GITHUB_WORKSPACE/artifacts/logs/unixnu" 2>/dev/null || true
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/machos"
+          find ../UniXNU/out ../UniXNU/out-reference -name '*.macho' -exec cp -v {} "$GITHUB_WORKSPACE/artifacts/machos/" \; 2>/dev/null | head -10 || true
+          du -sh "$GITHUB_WORKSPACE/artifacts"
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: artifacts/**
+          retention-days: 7
+          if-no-files-found: warn
