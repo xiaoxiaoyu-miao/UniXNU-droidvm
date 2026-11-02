@@ -1,0 +1,40 @@
+name: shim
+on:
+  workflow_dispatch:
+jobs:
+  shim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: rustup target
+        run: |
+          rustc --version; cargo --version
+          rustup target add aarch64-unknown-none-softfloat
+      - name: clone crosvm
+        run: git clone --depth 1 -b wip/virtio-mmio https://github.com/Droid-VM/crosvm.git crosvm
+      - name: build shim
+        run: |
+          cd crosvm/droidvm-shim
+          cargo build --release --target aarch64-unknown-none-softfloat 2>&1 | tail -20
+          ls -l target/aarch64-unknown-none-softfloat/release/ 2>/dev/null | head
+      - name: flat binary
+        run: |
+          cd crosvm/droidvm-shim
+          ELF=$(ls target/aarch64-unknown-none-softfloat/release/droidvm-shim 2>/dev/null || true)
+          echo "elf=$ELF"
+          if [ -n "$ELF" ]; then
+            (command -v llvm-objcopy >/dev/null && llvm-objcopy -O binary "$ELF" shim.bin) || \
+            (command -v aarch64-linux-gnu-objcopy >/dev/null && aarch64-linux-gnu-objcopy -O binary "$ELF" shim.bin) || \
+            (sudo apt-get install -y -qq binutils-aarch64-linux-gnu && aarch64-linux-gnu-objcopy -O binary "$ELF" shim.bin)
+            ls -l shim.bin; xxd -l 16 shim.bin
+            mkdir -p "$GITHUB_WORKSPACE/artifacts"
+            cp shim.bin "$GITHUB_WORKSPACE/artifacts/"
+          fi
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shim
+          path: artifacts/**
+          retention-days: 7
+          if-no-files-found: warn
