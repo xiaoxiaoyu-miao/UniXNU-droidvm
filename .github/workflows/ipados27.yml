@@ -1,0 +1,80 @@
+name: ipados27
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps
+        run: |
+          brew install llvm lld glslang shaderc spirv-tools openssl@3 gnu-sed bison flex cmake ninja pkg-config coreutils mtools dosfstools || true
+          printf '%s\n' 'export PATH=/opt/homebrew/opt/llvm/bin:$PATH' >> "$HOME/.bash_profile"
+          LLD=$(command -v lld-link || find /opt/homebrew -maxdepth 4 -name lld-link -type f 2>/dev/null | head -1)
+          if [ -n "$LLD" ]; then mkdir -p /opt/homebrew/opt/llvm/bin && ln -sf "$LLD" /opt/homebrew/opt/llvm/bin/lld-link; fi
+          command -v mformat; command -v gsed
+      - name: defconfig (ipados27 board)
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          cd ../UniXNU
+          ./unixnu defconfig droidvm_ipados27_defconfig -D "$GITHUB_WORKSPACE/ipados27"
+      - name: fetch sources
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          cd ../UniXNU
+          ./unixnu fetch
+      - name: fetch IPSW (11.6 GB)
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          cd ../UniXNU
+          ./unixnu ipsw fetch
+      - name: build kernel
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          cd ../UniXNU
+          ./unixnu build kernel
+      - name: build package
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          cd ../UniXNU
+          ./unixnu build package
+      - name: build payload
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          cd ../UniXNU
+          ./unixnu build payload
+      - name: collect
+        if: always()
+        run: |
+          df -h / | tail -1
+          mkdir -p artifacts/logs
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/logs artifacts/unixnu-logs 2>/dev/null || true
+          find ../UniXNU/out/droidvm -maxdepth 2 -type f \( -name '*.macho' -o -name '*.img' -o -name '*.efi' -o -name '*.fd' \) 2>/dev/null | head -20
+          for f in $(find ../UniXNU/out/droidvm -maxdepth 2 -type f \( -name '*.macho' -o -name '*.img' \) 2>/dev/null | head -10); do
+            cp -v "$f" "artifacts/$(echo $f | tr '/' '_')" 2>/dev/null
+          done
+          du -sh artifacts
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipados27-out
+          path: artifacts/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
