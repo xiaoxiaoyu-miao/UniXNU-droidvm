@@ -1,0 +1,77 @@
+name: images
+on:
+  workflow_dispatch:
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 350
+    steps:
+      - name: environment
+        run: |
+          sw_vers; sudo xcode-select -s /Applications/Xcode_27.1.app; xcodebuild -version; df -h / | tail -1
+      - uses: actions/checkout@v4
+      - name: clone UniXNU (wip/droidvm)
+        run: git clone --depth 1 -b wip/droidvm https://github.com/Droid-VM/UniXNU ../UniXNU
+      - name: brew deps
+        run: |
+          brew install llvm lld glslang shaderc spirv-tools openssl@3 gnu-sed bison flex cmake ninja pkg-config coreutils mtools dosfstools || true
+          export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+          LLD=$(command -v lld-link || find /opt/homebrew -maxdepth 4 -name lld-link -type f 2>/dev/null | head -1)
+          if [ -n "$LLD" ]; then mkdir -p /opt/homebrew/opt/llvm/bin && ln -sf "$LLD" /opt/homebrew/opt/llvm/bin/lld-link; fi
+          command -v mformat
+      - name: apply patches
+        run: |
+          git apply .github/droidvm-undefined-stubs.patch
+          git apply .github/plugin-tolerant.patch
+          git apply .github/skip-plugin.patch
+          git apply .github/ownervisor-tolerant.patch
+          git apply .github/payload-without-trust.patch
+          git apply .github/images-without-plugin.patch
+          echo patches ok
+      - name: build setup..images (2 GiB data seed)
+        env:
+          PATH: /opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin
+        run: |
+          set -o pipefail
+          python3 scripts/build-droidvm-all.py --from setup --to images --data-gib 2 --unique-chip-id 0123456789abcdef
+      - name: collect
+        if: always()
+        run: |
+          mkdir -p artifacts/images artifacts/small artifacts/logs
+          R=../UniXNU/out/droidvm/release
+          ls -lh "$R" 2>/dev/null || true
+          cp -v "$R"/os.img "$R"/systemos.img artifacts/images/ 2>/dev/null || true
+          cp -v "$R"/kernel.macho "$R"/droidvm-disk.img "$R"/release.json artifacts/small/ 2>/dev/null || true
+          cp -R ../UniXNU/out/droidvm/build-all/logs artifacts/logs 2>/dev/null || true
+          du -sh artifacts/images artifacts/small artifacts/logs
+      - name: upload small
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: small
+          path: |
+            artifacts/small/**
+            artifacts/logs/**
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: warn
+      - name: upload os.img
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-img
+          path: artifacts/images/os.img
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: warn
+      - name: upload systemos.img
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemos-img
+          path: artifacts/images/systemos.img
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: warn
